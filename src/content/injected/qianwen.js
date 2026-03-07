@@ -1,6 +1,5 @@
 const TARGET_URL = "chat2-api.qianwen.com/api/v1/session/msg/list";
-const CHAT_API_URL = "chat2.qianwen.com/api/v2/chat";
-
+const SESSION_LIST_URL = "chat2-api.qianwen.com/api/v2/session/page/list";
 const originalFetch = window.fetch;
 
 // 当前会话 ID
@@ -11,10 +10,9 @@ let fullLoadDone = false;
 const loadedPositions = new Set();
 // 保存最近一次拦截到的真实请求信息（含完整 headers），刷新时复用
 let savedRequestInfo = null;
-// 保存最近一次拦截到的千问 chat API 请求的基础信息（不含安全签名 headers）
-let savedChatRequestInfo = null;
-// 保存千问前端最新的 fetch 函数引用（经过安全 SDK 包装后的版本，会自动注入签名 headers）
-let wrappedFetch = null;
+// 记录是否已经主动获取过 session title
+let sessionTitleFetched = false;
+
 
 /**
  * 发送数据到 content script
@@ -32,6 +30,16 @@ function postData(payload) {
 function postLoadingStatus(status, loaded, hasMore) {
   window.postMessage(
     { type: "AI_CHAT_READER_LOADING", source: "qianwen", status, loaded, hasMore },
+    "*"
+  );
+}
+
+/**
+ * 发送 session list 数据到 content script（用于获取会话标题）
+ */
+function postSessionList(list) {
+  window.postMessage(
+    { type: "AI_CHAT_READER_SESSION_LIST", source: "qianwen", list },
     "*"
   );
 }
@@ -81,6 +89,63 @@ function extractHeaders(init) {
 function resetState() {
   fullLoadDone = false;
   loadedPositions.clear();
+  sessionTitleFetched = false;
+}
+
+/**
+ * 主动请求 session list 接口获取会话标题
+ * 从已拦截到的对话请求中提取认证信息（URL 参数），构造 session list 请求
+ */
+async function fetchSessionTitle() {
+  if (sessionTitleFetched || !savedRequestInfo) return;
+  sessionTitleFetched = true;
+
+  try {
+    // 从对话请求的 URL 参数中提取公共参数（认证信息）
+    var msgParams = savedRequestInfo.params;
+    var sessionListUrl = "https://chat2-api.qianwen.com/api/v2/session/page/list";
+
+    // 构造查询参数：复用对话请求中的公共参数
+    var queryParams = new URLSearchParams();
+    var commonKeys = ["biz_id", "chat_client", "device", "fr", "pr", "ut", "la", "tz"];
+    for (var i = 0; i < commonKeys.length; i++) {
+      var key = commonKeys[i];
+      var val = msgParams.get(key);
+      if (val) queryParams.set(key, val);
+    }
+
+    var fetchUrl = sessionListUrl + "?" + queryParams.toString();
+
+    // 只使用必要的 headers，避免从 savedRequestInfo.headers 继承导致 content-type 重复
+    var reqHeaders = {
+      "accept": "application/json",
+      "content-type": "application/json"
+    };
+    // 复用认证相关的 headers
+    var authKeys = ["x-deviceid", "x-platform", "x-xsrf-token"];
+    for (var j = 0; j < authKeys.length; j++) {
+      var ak = authKeys[j];
+      if (savedRequestInfo.headers[ak]) {
+        reqHeaders[ak] = savedRequestInfo.headers[ak];
+      }
+    }
+
+    var response = await originalFetch(fetchUrl, {
+      method: "POST",
+      headers: reqHeaders,
+      credentials: "include",
+      body: JSON.stringify({ limit: 50, next_token: "", sort_field: "modifiedTime", need_filter_tag: true })
+    });
+
+    if (!response.ok) return;
+
+    var data = await response.json();
+    if (data && data.code === 0 && data.data && Array.isArray(data.data.list)) {
+      postSessionList(data.data.list);
+    }
+  } catch (e) {
+    // ignore errors
+  }
 }
 
 /**
@@ -124,6 +189,9 @@ async function refetchWithSavedInfo() {
 
     const data = await response.json();
     postData(data);
+
+    // 刷新后也重新获取 session title
+    fetchSessionTitle();
 
     if (data && data.code === 0 && data.data && data.data.list) {
       const pageData = data.data;
@@ -230,45 +298,10 @@ function checkSessionChange() {
 }
 
 // ======== 拦截 fetch 请求 ========
-// 保存当前的 window.fetch（可能已经被千问安全 SDK 包装过，包含签名注入逻辑）
-// 我们的 LLM 请求将通过这个引用发出，从而自动获得安全签名
-wrappedFetch = window.fetch;
-
 window.fetch = async function () {
   const args = arguments;
   const url =
     typeof args[0] === "string" ? args[0] : args[0].url;
-
-  // 拦截千问 chat API 请求，捕获业务信息（不含安全签名 headers，签名由 SDK 自动注入）
-  if (url.includes(CHAT_API_URL)) {
-    try {
-      var init = args[1];
-      var bodyStr = "";
-      if (init && init.body) {
-        bodyStr = typeof init.body === "string" ? init.body : JSON.stringify(init.body);
-      }
-      var bodyObj = {};
-      try { bodyObj = JSON.parse(bodyStr); } catch (e) { /* ignore */ }
-
-      // 从 URL 中提取 ut 和 x-deviceid
-      var chatUrlObj = new URL(url);
-      var ut = chatUrlObj.searchParams.get("ut") || "";
-
-      // 提取少量不涉及安全签名的业务 headers
-      var capturedHeaders = extractHeaders(init);
-
-      savedChatRequestInfo = {
-        sessionId: bodyObj.session_id || extractSessionIdFromUrl(),
-        model: bodyObj.model || "Qwen3-Max",
-        ut: ut,
-        xDeviceId: capturedHeaders["x-deviceid"] || "",
-        xPlatform: capturedHeaders["x-platform"] || "pc_tongyi",
-        xXsrfToken: capturedHeaders["x-xsrf-token"] || "",
-      };
-    } catch (e) {
-      // ignore capture errors
-    }
-  }
 
   const response = await originalFetch.apply(this, args);
 
@@ -293,6 +326,9 @@ window.fetch = async function () {
       // 将拦截到的数据发送给 content script
       postData(data);
 
+      // 主动获取 session title（首次拦截到对话数据后触发）
+      fetchSessionTitle();
+
       // 如果还有下一页，主动加载全部数据
       if (
         data &&
@@ -315,222 +351,21 @@ window.fetch = async function () {
     }
   }
 
+  // 拦截 session list 接口，获取会话标题
+  if (url.includes(SESSION_LIST_URL)) {
+    const cloned = response.clone();
+    try {
+      const data = await cloned.json();
+      if (data && data.code === 0 && data.data && Array.isArray(data.data.list)) {
+        postSessionList(data.data.list);
+      }
+    } catch (e) {
+      // ignore parse errors
+    }
+  }
+
   return response;
 };
-
-/**
- * 生成唯一 ID（模拟千问前端的 req_id / chat_id 格式）
- */
-function generateUUID() {
-  return "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".replace(/x/g, function () {
-    return ((Math.random() * 16) | 0).toString(16);
-  });
-}
-
-/**
- * 解析 SSE 流式响应，提取最终完整的 AI 回复内容
- * @param {Response} response - fetch 响应
- * @param {string} requestId - 请求 ID，用于发送流式 chunk
- */
-async function parseSSEResponse(response, requestId) {
-  var reader = response.body.getReader();
-  var decoder = new TextDecoder("utf-8");
-  var buffer = "";
-  var lastContent = "";
-
-  while (true) {
-    var result = await reader.read();
-    if (result.done) break;
-
-    buffer += decoder.decode(result.value, { stream: true });
-
-    // 按双换行分割 SSE 事件
-    var parts = buffer.split("\n\n");
-    // 最后一段可能不完整，保留
-    buffer = parts.pop() || "";
-
-    for (var i = 0; i < parts.length; i++) {
-      var eventBlock = parts[i].trim();
-      if (!eventBlock) continue;
-
-      // 提取 data: 行
-      var lines = eventBlock.split("\n");
-      var dataLine = "";
-      for (var j = 0; j < lines.length; j++) {
-        if (lines[j].indexOf("data:") === 0) {
-          dataLine = lines[j].substring(5);
-          break;
-        }
-      }
-
-      if (!dataLine) continue;
-
-      try {
-        var parsed = JSON.parse(dataLine);
-        // 千问 SSE 响应结构: data.messages[1].content (index 1 是 AI 回复，index 0 是 signal/post)
-        if (parsed.data && parsed.data.messages) {
-          var msgs = parsed.data.messages;
-          for (var k = 0; k < msgs.length; k++) {
-            if (msgs[k].mime_type !== "signal/post" && msgs[k].content) {
-              lastContent = msgs[k].content;
-            }
-          }
-        }
-      } catch (e) {
-        // JSON 解析失败，跳过
-      }
-
-      // 每次解析到新内容后，发送流式 chunk 到 content script
-      if (lastContent && requestId) {
-        postLLMChunk(requestId, lastContent);
-      }
-    }
-  }
-
-  return lastContent;
-}
-
-/**
- * 通过千问页面 Cookie 调用千问 AI 对话 SSE 接口
- * 使用 wrappedFetch（千问安全 SDK 包装后的 fetch）发请求，签名 headers 会自动注入
- */
-async function handleLLMRequest(requestId, messages) {
-  if (!savedChatRequestInfo) {
-    postLLMResponse(requestId, null, "尚未捕获到千问 Chat 请求的认证信息。请先在千问页面发送一条消息后再试。");
-    return;
-  }
-
-  var fetchFn = wrappedFetch || originalFetch;
-
-  try {
-    var chatId = generateUUID();
-    var timestamp = Date.now();
-    var nonce = Math.random().toString(36).substring(2, 15);
-    var sessionId = extractSessionIdFromUrl() || savedChatRequestInfo.sessionId || "";
-
-    // 构造千问 chat API 请求体
-    var userContent = "";
-    for (var i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === "user") {
-        userContent = messages[i].content;
-        break;
-      }
-    }
-
-    var systemContent = "";
-    for (var i = 0; i < messages.length; i++) {
-      if (messages[i].role === "system") {
-        systemContent = messages[i].content;
-        break;
-      }
-    }
-
-    if (systemContent && userContent) {
-      userContent = systemContent + "\n\n" + userContent;
-    }
-
-    var reqBody = {
-      deep_search: "0",
-      req_id: chatId,
-      model: savedChatRequestInfo.model || "Qwen3-Max",
-      scene: "chat",
-      session_id: sessionId,
-      sub_scene: "chat",
-      temporary: true,
-      messages: [
-        {
-          content: userContent,
-          mime_type: "text/plain",
-          meta_data: { ori_query: userContent },
-        },
-      ],
-      from: "default",
-      parent_req_id: "0",
-      scene_param: "first_turn",
-      chat_client: "h5",
-      client_tm: String(timestamp),
-      protocol_version: "v2",
-      biz_id: "ai_qwen",
-    };
-
-    // 只传业务 headers，安全签名由 wrappedFetch 中的千问 SDK 拦截器自动注入
-    var headers = {
-      "accept": "application/json, text/event-stream, text/plain, */*",
-      "content-type": "application/json",
-      "x-chat-id": chatId,
-      "x-platform": savedChatRequestInfo.xPlatform || "pc_tongyi",
-    };
-    if (savedChatRequestInfo.xDeviceId) {
-      headers["x-deviceid"] = savedChatRequestInfo.xDeviceId;
-    }
-    if (savedChatRequestInfo.xXsrfToken) {
-      headers["x-xsrf-token"] = savedChatRequestInfo.xXsrfToken;
-    }
-
-    var urlParams = new URLSearchParams({
-      biz_id: "ai_qwen",
-      chat_client: "h5",
-      device: "pc",
-      fr: "pc",
-      pr: "qwen",
-      ut: savedChatRequestInfo.ut || "",
-      nonce: nonce,
-      timestamp: String(timestamp),
-    });
-
-    var fetchUrl = "https://chat2.qianwen.com/api/v2/chat?" + urlParams.toString();
-
-    var response = await fetchFn(fetchUrl, {
-      method: "POST",
-      headers: headers,
-      credentials: "include",
-      body: JSON.stringify(reqBody),
-    });
-
-    if (!response.ok) {
-      var errText = "";
-      try { errText = await response.text(); } catch (e) { /* ignore */ }
-      postLLMResponse(requestId, null, "千问 API 请求失败 (" + response.status + "): " + errText.slice(0, 200));
-      return;
-    }
-
-    // 解析 SSE 流式响应（同时发送流式 chunk）
-    var content = await parseSSEResponse(response, requestId);
-
-    if (content) {
-      postLLMResponse(requestId, content, null);
-    } else {
-      postLLMResponse(requestId, null, "千问 API 返回内容为空，请重试。");
-    }
-  } catch (err) {
-    postLLMResponse(requestId, null, "千问 AI 请求出错: " + (err.message || String(err)));
-  }
-}
-
-function postLLMChunk(requestId, content) {
-  window.postMessage(
-    {
-      type: "AI_CHAT_READER_LLM_CHUNK",
-      source: "qianwen",
-      requestId: requestId,
-      content: content,
-    },
-    "*"
-  );
-}
-
-function postLLMResponse(requestId, content, error) {
-  window.postMessage(
-    {
-      type: "AI_CHAT_READER_LLM_RESPONSE",
-      source: "qianwen",
-      requestId: requestId,
-      content: content,
-      error: error,
-    },
-    "*"
-  );
-}
 
 // ======== 监听来自 content script 的消息 ========
 window.addEventListener("message", function (event) {
@@ -540,11 +375,6 @@ window.addEventListener("message", function (event) {
   if (event.data.type === "AI_CHAT_READER_REFRESH") {
     resetState();
     refetchWithSavedInfo();
-  }
-
-  // LLM 请求：通过千问页面 Token 调用 AI 接口
-  if (event.data.type === "AI_CHAT_READER_LLM_REQUEST" && event.data.requestId) {
-    handleLLMRequest(event.data.requestId, event.data.messages);
   }
 });
 

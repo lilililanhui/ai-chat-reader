@@ -51,14 +51,7 @@ export async function saveConfig(config: AppConfig): Promise<void> {
   }
 }
 
-export function hasCustomLLM(config: AppConfig): boolean {
-  return !!(config.llm.apiEndpoint && config.llm.apiKey);
-}
-
-export function isOnQianwen(): boolean {
-  return location.origin.startsWith("https://www.qianwen.com");
-}
-
-export function hasAnyLLM(config: AppConfig): boolean {
-  return isOnQianwen() || hasCustomLLM(config);
+/** 检查 AI 模型配置是否完整（API 端点、API Key、模型名称三项都必须填写） */
+export function hasLLMConfigured(config: AppConfig): boolean {
+  return !!(config.llm.apiEndpoint && config.llm.apiKey && config.llm.modelName);
 }

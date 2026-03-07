@@ -9,6 +9,8 @@ const sessionChangeCallbacks: Array<(sessionId: string) => void> = [];
 
 // 已收集的对话项，按 req_id 去重
 const collectedItems = new Map<string, QianwenListItem>();
+// 缓存 session list 中的标题映射（sessionId -> title）
+const sessionTitleCache = new Map<string, string>();
 
 interface QianwenMessage {
   content?: string;
@@ -98,6 +100,22 @@ function getSessionIdFromUrl(): string {
   return match ? match[1] : "";
 }
 
+function handleSessionList(list: Array<{ session_id: string; title?: string }>) {
+  for (const item of list) {
+    if (item.session_id && item.title) {
+      sessionTitleCache.set(item.session_id, item.title);
+    }
+  }
+
+  // 如果当前 sessionInfo 已存在但 title 为空，尝试从缓存补全
+  if (sessionInfo && !sessionInfo.title) {
+    const cachedTitle = sessionTitleCache.get(sessionInfo.sessionId);
+    if (cachedTitle) {
+      sessionInfo.title = cachedTitle;
+    }
+  }
+}
+
 function handleApiData(payload: Record<string, unknown>) {
   if (!payload || payload.code !== 0) return;
 
@@ -121,7 +139,7 @@ function handleApiData(payload: Record<string, unknown>) {
     if (firstItem && !sessionInfo) {
       sessionInfo = {
         sessionId: firstItem.session_id,
-        title: "",
+        title: sessionTitleCache.get(firstItem.session_id) || "",
         createdAt: firstItem.request_timestamp,
         updatedAt: firstItem.request_timestamp,
       };
@@ -191,6 +209,11 @@ const qianwenStrategy: Strategy = {
       // 处理对话数据
       if (event.data.type === "AI_CHAT_READER_DATA") {
         handleApiData(event.data.payload);
+      }
+
+      // 处理 session list 数据（获取会话标题）
+      if (event.data.type === "AI_CHAT_READER_SESSION_LIST") {
+        handleSessionList(event.data.list || []);
       }
 
       // 处理加载状态

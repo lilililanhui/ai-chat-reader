@@ -1,8 +1,7 @@
 import type { ChatTurn, SessionInfo } from "../strategies/types.js";
 import { generateMarkdown, downloadMarkdown } from "../utils/exportMarkdown.js";
 import { generateAIDocument } from "../utils/aiExport.js";
-import { loadConfig, hasAnyLLM } from "../utils/storage.js";
-import type { AppConfig } from "../utils/storage.js";
+import { loadConfig, hasLLMConfigured } from "../utils/storage.js";
 
 type ExportModeOptions = {
   shadow: ShadowRoot;
@@ -26,6 +25,24 @@ export function enterExportMode(options: ExportModeOptions) {
   let currentMarkdown = "";
   let abortController: AbortController | null = null;
 
+  // Clean up any residual UI from previous modes
+  const oldFooter = shadow.querySelector(".acr-footer");
+  if (oldFooter) oldFooter.remove();
+  const oldPreview = shadow.querySelector(".acr-preview-wrap");
+  if (oldPreview) oldPreview.remove();
+  const oldLoading = shadow.querySelector(".acr-ai-loading-wrap");
+  if (oldLoading) oldLoading.remove();
+  const oldSettings = shadow.querySelector(".acr-settings-wrap");
+  if (oldSettings) oldSettings.remove();
+  const oldBack = shadow.querySelector(".acr-back-btn");
+  if (oldBack) oldBack.remove();
+
+  // Declare all variables before calling renderSelectPhase(),
+  // because let/const have TDZ and cannot be accessed before initialization.
+  let selectAllCheckbox: HTMLInputElement | null = null;
+  const cardCheckboxes: { checkbox: HTMLInputElement; card: HTMLDivElement; index: number }[] = [];
+
+  list.style.display = "";
   list.innerHTML = "";
   renderSelectPhase();
 
@@ -33,12 +50,29 @@ export function enterExportMode(options: ExportModeOptions) {
     abortController?.abort();
     const f = shadow.querySelector(".acr-footer");
     if (f) f.remove();
+    removeBackBtn();
     onExit();
   }
 
-  // ==================== Select Phase ====================
-  let selectAllCheckbox: HTMLInputElement | null = null;
-  const cardCheckboxes: { checkbox: HTMLInputElement; card: HTMLDivElement; index: number }[] = [];
+  function injectBackBtn(onClick: () => void) {
+    removeBackBtn();
+    const header = panel.querySelector(".acr-header") as HTMLDivElement;
+    if (!header) return;
+    const btn = document.createElement("button");
+    btn.className = "acr-icon-btn acr-back-btn";
+    btn.type = "button";
+    btn.title = "返回";
+    btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>`;
+    btn.addEventListener("click", onClick);
+    header.insertBefore(btn, header.firstChild);
+  }
+
+  function removeBackBtn() {
+    const header = panel.querySelector(".acr-header") as HTMLDivElement;
+    if (!header) return;
+    const existing = header.querySelector(".acr-back-btn");
+    if (existing) existing.remove();
+  }
 
   function renderSelectPhase() {
     list.innerHTML = "";
@@ -113,6 +147,8 @@ export function enterExportMode(options: ExportModeOptions) {
       list.appendChild(card);
     }
 
+    // Ensure list is visible (it may have been hidden by preview/AI phase)
+    list.style.display = "";
     createSelectFooter();
   }
 
@@ -134,14 +170,15 @@ export function enterExportMode(options: ExportModeOptions) {
   }
 
   function createSelectFooter() {
-    removeFooter();
+    // Only remove old footer element, don't call full removeFooter()
+    // which would also remove preview-wrap and reset list display
+    const oldFooter = shadow.querySelector(".acr-footer");
+    if (oldFooter) oldFooter.remove();
+    injectBackBtn(cleanup);
+
     const footer = document.createElement("div");
     footer.className = "acr-footer";
-
-    const backBtn = document.createElement("button");
-    backBtn.className = "acr-btn-secondary";
-    backBtn.type = "button";
-    backBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg> 返回`;
+    footer.style.justifyContent = "flex-end";
 
     const directBtn = document.createElement("button");
     directBtn.className = "acr-btn-secondary";
@@ -153,8 +190,6 @@ export function enterExportMode(options: ExportModeOptions) {
     aiBtn.type = "button";
     aiBtn.textContent = "AI 润色";
 
-    footer.appendChild(backBtn);
-
     const btnGroup = document.createElement("div");
     btnGroup.className = "acr-btn-group";
     btnGroup.appendChild(directBtn);
@@ -163,11 +198,11 @@ export function enterExportMode(options: ExportModeOptions) {
 
     panel.appendChild(footer);
 
-    // Check AI availability
+    // Check AI availability: all three LLM config fields must be set
     loadConfig().then((config) => {
-      if (!hasAnyLLM(config)) {
+      if (!hasLLMConfigured(config)) {
         aiBtn.disabled = true;
-        aiBtn.title = "请先在设置中配置 API Key";
+        aiBtn.title = "请先在设置中配置 API 端点、API Key 和模型名称";
       }
     });
 
@@ -178,8 +213,6 @@ export function enterExportMode(options: ExportModeOptions) {
     update();
 
     (footer as any)._update = update;
-
-    backBtn.addEventListener("click", cleanup);
 
     directBtn.addEventListener("click", async () => {
       if (selected.size === 0) { alert("请至少选择一条对话"); return; }
@@ -416,21 +449,17 @@ export function enterExportMode(options: ExportModeOptions) {
     list.style.display = "none";
     panel.insertBefore(wrap, list);
 
+    // Back button in header
+    injectBackBtn(() => {
+      wrap.remove();
+      list.style.display = "";
+      renderSelectPhase();
+    });
+
     // Footer
     const footer = document.createElement("div");
     footer.className = "acr-footer";
-
-    const backBtn = document.createElement("button");
-    backBtn.className = "acr-btn-secondary";
-    backBtn.type = "button";
-    backBtn.textContent = "返回选择";
-
-    const downloadBtn = document.createElement("button");
-    downloadBtn.className = "acr-btn-primary";
-    downloadBtn.type = "button";
-    downloadBtn.textContent = "下载 .md 文件";
-
-    footer.appendChild(backBtn);
+    footer.style.justifyContent = "flex-end";
 
     if (isAIMode) {
       const regenBtn = document.createElement("button");
@@ -445,14 +474,13 @@ export function enterExportMode(options: ExportModeOptions) {
       footer.appendChild(regenBtn);
     }
 
+    const downloadBtn = document.createElement("button");
+    downloadBtn.className = "acr-btn-primary";
+    downloadBtn.type = "button";
+    downloadBtn.textContent = "下载 .md 文件";
+
     footer.appendChild(downloadBtn);
     panel.appendChild(footer);
-
-    backBtn.addEventListener("click", () => {
-      wrap.remove();
-      list.style.display = "";
-      renderSelectPhase();
-    });
 
     downloadBtn.addEventListener("click", () => {
       const title = sessionInfo?.title || "AI对话记录";
@@ -468,6 +496,7 @@ export function enterExportMode(options: ExportModeOptions) {
     if (pw) pw.remove();
     const lw = shadow.querySelector(".acr-ai-loading-wrap");
     if (lw) lw.remove();
+    removeBackBtn();
     list.style.display = "";
   }
 }

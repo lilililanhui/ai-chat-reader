@@ -21,6 +21,15 @@ export async function openSettings(options: SettingsOptions) {
   const existingFooter = shadow.querySelector(".acr-footer");
   if (existingFooter) existingFooter.remove();
 
+  // Inject back button into header (left side)
+  const header = panel.querySelector(".acr-header") as HTMLDivElement;
+  const backBtn = document.createElement("button");
+  backBtn.className = "acr-icon-btn acr-back-btn";
+  backBtn.type = "button";
+  backBtn.title = "返回";
+  backBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>`;
+  header.insertBefore(backBtn, header.firstChild);
+
   const wrap = document.createElement("div");
   wrap.className = "acr-settings-wrap";
 
@@ -50,18 +59,6 @@ export async function openSettings(options: SettingsOptions) {
   wrap.appendChild(exportSection);
 
   panel.insertBefore(wrap, list);
-
-  // Footer with back button only
-  const footer = document.createElement("div");
-  footer.className = "acr-footer";
-
-  const backBtn = document.createElement("button");
-  backBtn.className = "acr-btn-secondary";
-  backBtn.type = "button";
-  backBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg> 返回`;
-
-  footer.appendChild(backBtn);
-  panel.appendChild(footer);
 
   // Auto-save on any input change
   const autoSave = async () => {
@@ -95,7 +92,7 @@ export async function openSettings(options: SettingsOptions) {
 
   function close() {
     wrap.remove();
-    footer.remove();
+    backBtn.remove();
     list.style.display = "";
     onClose();
   }

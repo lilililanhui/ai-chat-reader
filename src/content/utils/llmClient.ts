@@ -1,5 +1,4 @@
 import type { LLMConfig } from "./storage.js";
-import { isOnQianwen } from "./storage.js";
 
 export type LLMMessage = {
   role: "system" | "user" | "assistant";
@@ -13,23 +12,18 @@ export type LLMRequestOptions = {
 };
 
 /**
- * Call LLM API and return the full response text.
- * Supports: 1) Qianwen page token (via injected script), 2) OpenAI-compatible API.
- * If onChunk is provided, it will be called with accumulating content during streaming.
+ * Call LLM API via OpenAI-compatible endpoint.
+ * Requires apiEndpoint, apiKey and modelName to be configured.
  */
 export async function callLLM(
   config: LLMConfig,
   options: LLMRequestOptions
 ): Promise<string> {
-  if (isOnQianwen()) {
-    return callViaQianwenPage(options);
+  if (!config.apiEndpoint || !config.apiKey || !config.modelName) {
+    throw new Error("请先在设置中配置 API 端点、API Key 和模型名称。");
   }
 
-  if (config.apiEndpoint && config.apiKey) {
-    return callOpenAICompatible(config, options);
-  }
-
-  throw new Error("没有可用的 AI 服务。请配置 API Key 或在千问页面使用。");
+  return callOpenAICompatible(config, options);
 }
 
 // ===== OpenAI Compatible API =====
@@ -49,7 +43,7 @@ async function callOpenAICompatible(
         Authorization: `Bearer ${config.apiKey}`,
       },
       body: JSON.stringify({
-        model: config.modelName || "qwen-plus",
+        model: config.modelName,
         messages: options.messages,
         stream: true,
       }),
@@ -105,7 +99,7 @@ async function callOpenAICompatible(
       Authorization: `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify({
-      model: config.modelName || "qwen-plus",
+      model: config.modelName,
       messages: options.messages,
       stream: false,
     }),
@@ -123,81 +117,4 @@ async function callOpenAICompatible(
     throw new Error("API 返回数据格式异常");
   }
   return content;
-}
-
-// ===== Qianwen Page Token (via postMessage to injected script) =====
-let requestIdCounter = 0;
-
-function callViaQianwenPage(options: LLMRequestOptions): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const requestId = `acr_llm_${++requestIdCounter}_${Date.now()}`;
-
-    const onAbort = () => {
-      window.removeEventListener("message", handler);
-      reject(new Error("请求已取消"));
-    };
-
-    if (options.signal) {
-      if (options.signal.aborted) {
-        reject(new Error("请求已取消"));
-        return;
-      }
-      options.signal.addEventListener("abort", onAbort, { once: true });
-    }
-
-    const timeoutId = setTimeout(() => {
-      window.removeEventListener("message", handler);
-      options.signal?.removeEventListener("abort", onAbort);
-      reject(new Error("AI 请求超时（60s）"));
-    }, 60000);
-
-    function handler(event: MessageEvent) {
-      if (
-        event.source !== window ||
-        !event.data ||
-        event.data.source !== "qianwen"
-      ) {
-        return;
-      }
-
-      // Handle streaming chunks
-      if (
-        event.data.type === "AI_CHAT_READER_LLM_CHUNK" &&
-        event.data.requestId === requestId
-      ) {
-        if (options.onChunk && event.data.content) {
-          options.onChunk(event.data.content);
-        }
-        return;
-      }
-
-      // Handle final response
-      if (
-        event.data.type === "AI_CHAT_READER_LLM_RESPONSE" &&
-        event.data.requestId === requestId
-      ) {
-        window.removeEventListener("message", handler);
-        clearTimeout(timeoutId);
-        options.signal?.removeEventListener("abort", onAbort);
-
-        if (event.data.error) {
-          reject(new Error(event.data.error));
-        } else {
-          resolve(event.data.content || "");
-        }
-      }
-    }
-
-    window.addEventListener("message", handler);
-
-    window.postMessage(
-      {
-        type: "AI_CHAT_READER_LLM_REQUEST",
-        source: "qianwen",
-        requestId,
-        messages: options.messages,
-      },
-      "*"
-    );
-  });
 }

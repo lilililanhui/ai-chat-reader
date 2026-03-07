@@ -3,6 +3,7 @@ import type { ChatTurn } from "./strategies/types.js";
 import { createUI } from "./ui/createUI.js";
 import { enterExportMode } from "./ui/exportMode.js";
 import { openSettings } from "./ui/settingsUI.js";
+import { openAbout } from "./ui/aboutUI.js";
 import { extractPreview, flashTarget, scrollToMessage } from "./utils/dom.js";
 import { debounce } from "./utils/debounce.js";
 
@@ -16,12 +17,14 @@ function bootstrap() {
     isOpen: boolean;
     isExportMode: boolean;
     isSettings: boolean;
+    isAbout: boolean;
     messages: Array<{ id: string; text: string; node: HTMLElement }>;
     chatTurns: ChatTurn[];
   } = {
     isOpen: false,
     isExportMode: false,
     isSettings: false,
+    isAbout: false,
     messages: [],
     chatTurns: [],
   };
@@ -37,6 +40,7 @@ function bootstrap() {
     closeButton,
     exportButton,
     settingsButton,
+    aboutButton,
   } = ui;
 
   document.documentElement.appendChild(container);
@@ -45,7 +49,7 @@ function bootstrap() {
 
   strategy.onDataUpdate((turns) => {
     state.chatTurns = turns;
-    if (!state.isExportMode && !state.isSettings) {
+    if (!state.isExportMode && !state.isSettings && !state.isAbout) {
       renderTurnsList();
     }
   });
@@ -53,7 +57,7 @@ function bootstrap() {
   // 监听加载状态变化
   if (strategy.onLoadingStatusChange) {
     strategy.onLoadingStatusChange((loadStatus) => {
-      if (state.isExportMode || state.isSettings) return;
+      if (state.isExportMode || state.isSettings || state.isAbout) return;
       const turns = state.chatTurns;
       if (loadStatus.state === "loading") {
         statusText.textContent = `正在加载对话数据… 已获取 ${turns.length} 轮`;
@@ -73,7 +77,7 @@ function bootstrap() {
       if (!state.isOpen) return;
 
       // 如果当前在导出模式或设置页，弹出确认框
-      if (state.isExportMode || state.isSettings) {
+      if (state.isExportMode || state.isSettings || state.isAbout) {
         showSessionSwitchDialog(shadow, () => {
           // 确认：退回列表页
           exitCurrentMode();
@@ -99,8 +103,8 @@ function bootstrap() {
       alert("暂无对话数据，请等待页面加载对话后重试");
       return;
     }
-    // 如果在设置页，先关闭
-    if (state.isSettings) {
+    // 如果在设置页或已在导出模式，先清理
+    if (state.isSettings || state.isExportMode) {
       exitCurrentMode();
     }
     state.isExportMode = true;
@@ -118,8 +122,7 @@ function bootstrap() {
   });
 
   settingsButton.addEventListener("click", () => {
-    // 如果在导出模式，先退出
-    if (state.isExportMode) {
+    if (state.isExportMode || state.isAbout) {
       exitCurrentMode();
     }
     state.isSettings = true;
@@ -134,10 +137,27 @@ function bootstrap() {
     });
   });
 
-  /** 退出当前所有子模式（导出 / 设置），恢复列表 */
+  aboutButton.addEventListener("click", () => {
+    if (state.isExportMode || state.isSettings) {
+      exitCurrentMode();
+    }
+    state.isAbout = true;
+    openAbout({
+      shadow,
+      panel,
+      list,
+      onClose: () => {
+        state.isAbout = false;
+        renderTurnsList();
+      },
+    });
+  });
+
+  /** 退出当前所有子模式（导出 / 设置 / 关于），恢复列表 */
   function exitCurrentMode() {
     state.isExportMode = false;
     state.isSettings = false;
+    state.isAbout = false;
     // 清理导出模式残留元素
     const footer = shadow.querySelector(".acr-footer");
     if (footer) footer.remove();
@@ -148,13 +168,19 @@ function bootstrap() {
     // 清理设置页残留
     const settingsWrap = shadow.querySelector(".acr-settings-wrap");
     if (settingsWrap) settingsWrap.remove();
+    // 清理关于页残留
+    const aboutWrap = shadow.querySelector(".acr-about-wrap");
+    if (aboutWrap) aboutWrap.remove();
+    // 清理 header 中的返回按钮
+    const backBtn = shadow.querySelector(".acr-back-btn");
+    if (backBtn) backBtn.remove();
     list.style.display = "";
   }
 
   const scheduleRefresh = debounce(refreshMessages, 300);
 
   const observer = new MutationObserver(() => {
-    if (!state.isExportMode && !state.isSettings) {
+    if (!state.isExportMode && !state.isSettings && !state.isAbout) {
       scheduleRefresh();
     }
   });
@@ -175,7 +201,7 @@ function bootstrap() {
       node,
     }));
 
-    if (!state.isExportMode && !state.isSettings) {
+    if (!state.isExportMode && !state.isSettings && !state.isAbout) {
       if (state.chatTurns.length > 0) {
         renderTurnsList();
       } else {
