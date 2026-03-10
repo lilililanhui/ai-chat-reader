@@ -48,10 +48,5 @@ AI Chat Reader 是一个快速查看 AI 会话的 Chrome 浏览器插件。
 2. 打开「开发者模式」
 3. 点击「加载已解压的扩展程序」，选择 `dist` 目录
 
-## 站点策略
-- **千问**：域名以 `https://www.qianwen.com` 开头，用户会话 class 为 `questionItem-*`
-- **豆包**：域名以 `https://www.douban.com` 开头（策略待补充）
-
 ## 后续计划
-- 增加 `options` 设置页
 - 扩展更多站点策略
