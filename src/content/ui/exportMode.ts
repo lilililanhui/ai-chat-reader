@@ -62,6 +62,7 @@ export function enterExportMode(options: ExportModeOptions) {
     btn.className = "acr-icon-btn acr-back-btn";
     btn.type = "button";
     btn.title = "返回";
+    btn.setAttribute("data-tooltip", "返回");
     btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>`;
     btn.addEventListener("click", onClick);
     header.insertBefore(btn, header.firstChild);

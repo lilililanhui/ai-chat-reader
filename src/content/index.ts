@@ -78,13 +78,48 @@ function bootstrap() {
 
       // 如果当前在导出模式或设置页，弹出确认框
       if (state.isExportMode || state.isSettings || state.isAbout) {
-        showSessionSwitchDialog(shadow, () => {
-          // 确认：退回列表页
-          exitCurrentMode();
-          renderTurnsList();
-        });
+        showSessionSwitchDialog(
+          shadow,
+          panel,
+          () => {
+            // 确认：退回列表页
+            exitCurrentMode();
+            renderTurnsList();
+          },
+          () => {
+            // 用户选择留在当前，显示刷新按钮
+            showRefreshButton();
+          }
+        );
       }
     });
+  }
+
+  /** 在header的actions区域添加刷新按钮 */
+  function showRefreshButton() {
+    const actions = panel.querySelector(".acr-actions") as HTMLDivElement;
+    if (!actions) return;
+    
+    // 如果已存在刷新按钮则不重复添加
+    if (actions.querySelector(".acr-refresh-btn")) return;
+    
+    const refreshBtn = document.createElement("button");
+    refreshBtn.className = "acr-icon-btn acr-refresh-btn";
+    refreshBtn.type = "button";
+    refreshBtn.title = "刷新对话数据";
+    refreshBtn.setAttribute("data-tooltip", "刷新");
+    refreshBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="m3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>`;
+    
+    refreshBtn.addEventListener("click", () => {
+      // 退出当前模式并刷新列表
+      exitCurrentMode();
+      renderTurnsList();
+      // 移除刷新按钮
+      refreshBtn.remove();
+    });
+    
+    // 插入到第一个位置
+    actions.insertBefore(refreshBtn, actions.firstChild);
   }
 
   floatingButton.addEventListener("click", () => {
@@ -99,12 +134,18 @@ function bootstrap() {
   });
 
   exportButton.addEventListener("click", () => {
+    // 如果已经在导出模式，则关闭并返回列表
+    if (state.isExportMode) {
+      exitCurrentMode();
+      renderTurnsList();
+      return;
+    }
     if (state.chatTurns.length === 0) {
       alert("暂无对话数据，请等待页面加载对话后重试");
       return;
     }
-    // 如果在设置页或已在导出模式，先清理
-    if (state.isSettings || state.isExportMode) {
+    // 如果在设置页或关于页，先清理
+    if (state.isSettings || state.isAbout) {
       exitCurrentMode();
     }
     state.isExportMode = true;
@@ -122,6 +163,12 @@ function bootstrap() {
   });
 
   settingsButton.addEventListener("click", () => {
+    // 如果已经在设置页，则关闭并返回列表
+    if (state.isSettings) {
+      exitCurrentMode();
+      renderTurnsList();
+      return;
+    }
     if (state.isExportMode || state.isAbout) {
       exitCurrentMode();
     }
@@ -138,6 +185,12 @@ function bootstrap() {
   });
 
   aboutButton.addEventListener("click", () => {
+    // 如果已经在关于页，则关闭并返回列表
+    if (state.isAbout) {
+      exitCurrentMode();
+      renderTurnsList();
+      return;
+    }
     if (state.isExportMode || state.isSettings) {
       exitCurrentMode();
     }
@@ -261,14 +314,19 @@ function bootstrap() {
   }
 }
 
-/** 显示会话切换确认对话框 */
-function showSessionSwitchDialog(shadow: ShadowRoot, onConfirm: () => void) {
+/** 显示会话切换确认对话框 - 在插件panel内显示 */
+function showSessionSwitchDialog(
+  shadow: ShadowRoot,
+  panel: HTMLDivElement,
+  onConfirm: () => void,
+  onStay: () => void
+) {
   // 防重复
   const existing = shadow.querySelector(".acr-dialog-overlay");
   if (existing) existing.remove();
 
   const overlay = document.createElement("div");
-  overlay.className = "acr-dialog-overlay";
+  overlay.className = "acr-dialog-overlay acr-dialog-in-panel";
 
   const dialog = document.createElement("div");
   dialog.className = "acr-dialog";
@@ -288,7 +346,10 @@ function showSessionSwitchDialog(shadow: ShadowRoot, onConfirm: () => void) {
   cancelBtn.className = "acr-btn-secondary";
   cancelBtn.type = "button";
   cancelBtn.textContent = "留在当前";
-  cancelBtn.addEventListener("click", () => overlay.remove());
+  cancelBtn.addEventListener("click", () => {
+    overlay.remove();
+    onStay();
+  });
 
   const confirmBtn = document.createElement("button");
   confirmBtn.className = "acr-btn-primary";
@@ -305,7 +366,9 @@ function showSessionSwitchDialog(shadow: ShadowRoot, onConfirm: () => void) {
   dialog.appendChild(body);
   dialog.appendChild(actions);
   overlay.appendChild(dialog);
-  shadow.appendChild(overlay);
+  
+  // 将对话框添加到panel内而非shadow root
+  panel.appendChild(overlay);
 }
 
 bootstrap();

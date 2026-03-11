@@ -20,6 +20,7 @@ export function openAbout(options: AboutOptions) {
   backBtn.className = "acr-icon-btn acr-back-btn";
   backBtn.type = "button";
   backBtn.title = "返回";
+  backBtn.setAttribute("data-tooltip", "返回");
   backBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><polyline points="12 19 5 12 12 5"/></svg>`;
   header.insertBefore(backBtn, header.firstChild);
 
@@ -33,7 +34,7 @@ export function openAbout(options: AboutOptions) {
   const logoWrap = document.createElement("div");
   logoWrap.className = "acr-about-logo";
   const logoImg = document.createElement("img");
-  logoImg.src = chrome.runtime.getURL("assets/logo.png");
+  logoImg.src = chrome.runtime.getURL("assets/logo-128.png");
   logoImg.alt = "AI Chat Reader";
   logoWrap.appendChild(logoImg);
 

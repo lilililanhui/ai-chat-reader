@@ -26,7 +26,7 @@ export function createUI(): UIRefs {
   floatingButton.type = "button";
   floatingButton.title = "打开 AI 会话侧边栏";
   const logoImg = document.createElement("img");
-  logoImg.src = chrome.runtime.getURL("assets/logo.png");
+  logoImg.src = chrome.runtime.getURL("assets/logo-128.png");
   logoImg.alt = "AI Chat Reader";
   floatingButton.appendChild(logoImg);
   setupFabDrag(floatingButton);
@@ -54,24 +54,28 @@ export function createUI(): UIRefs {
   settingsButton.className = "acr-icon-btn";
   settingsButton.type = "button";
   settingsButton.title = "设置";
+  settingsButton.setAttribute("data-tooltip", "设置");
   settingsButton.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`;
 
   const exportButton = document.createElement("button");
   exportButton.className = "acr-icon-btn";
   exportButton.type = "button";
   exportButton.title = "导出对话";
+  exportButton.setAttribute("data-tooltip", "导出对话");
   exportButton.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
 
   const closeButton = document.createElement("button");
   closeButton.className = "acr-icon-btn";
   closeButton.type = "button";
   closeButton.title = "关闭侧边栏";
+  closeButton.setAttribute("data-tooltip", "关闭");
   closeButton.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>`;
 
   const aboutButton = document.createElement("button");
   aboutButton.className = "acr-icon-btn";
   aboutButton.type = "button";
   aboutButton.title = "关于";
+  aboutButton.setAttribute("data-tooltip", "关于");
   aboutButton.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
 
   actions.appendChild(aboutButton);
@@ -185,7 +189,7 @@ function getStyles(): string {
 /* Fab — transparent, draggable */
 .acr-fab {
   position: fixed; right: 60px; bottom: 120px;
-  width: 64px; height: 64px; border-radius: 0;
+  width: 45px; height: 45px; border-radius: 0;
   background: transparent; border: none;
   box-shadow: none;
   cursor: grab; padding: 0; overflow: visible;
@@ -228,10 +232,55 @@ function getStyles(): string {
   border: none; background: transparent; color: #78716c;
   cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
   padding: 0; transition: all 0.15s;
+  position: relative;
 }
 .acr-icon-btn:hover { background: rgba(0,0,0,0.08); color: #1c1917; }
 .acr-icon-btn.spinning svg { animation: acr-spin 0.8s linear infinite; }
 @keyframes acr-spin { from{transform:rotate(0)} to{transform:rotate(360deg)} }
+
+/* Custom tooltip for icon buttons - 向下展示 */
+.acr-icon-btn::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 8px;
+  background: #1c1917;
+  color: #fff;
+  font-size: 11px;
+  border-radius: 4px;
+  white-space: nowrap;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+  pointer-events: none;
+  z-index: 1000;
+}
+.acr-icon-btn::before {
+  content: "";
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-bottom-color: #1c1917;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s, visibility 0.15s;
+  pointer-events: none;
+  z-index: 1000;
+}
+.acr-icon-btn:hover::after,
+.acr-icon-btn:hover::before {
+  opacity: 1;
+  visibility: visible;
+}
+/* Hide tooltip if no data-tooltip attribute */
+.acr-icon-btn:not([data-tooltip])::after,
+.acr-icon-btn:not([data-tooltip])::before {
+  display: none;
+}
 
 .acr-btn-outline {
   padding: 4px 12px; border-radius: 6px;
@@ -411,6 +460,12 @@ function getStyles(): string {
   display: flex; align-items: center; justify-content: center;
   animation: acr-fade-in 0.15s ease;
 }
+/* 在panel内显示的对话框 */
+.acr-dialog-overlay.acr-dialog-in-panel {
+  position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 100;
+}
 .acr-dialog {
   background: #fff; border-radius: 12px; padding: 20px 24px;
   box-shadow: 0 8px 32px rgba(0,0,0,0.18);
@@ -421,6 +476,15 @@ function getStyles(): string {
 .acr-dialog-body { font-size: 13px; color: #78716c; line-height: 1.6; margin-bottom: 16px; }
 .acr-dialog-actions { display: flex; gap: 8px; justify-content: flex-end; }
 @keyframes acr-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* Refresh button */
+.acr-refresh-btn {
+  color: #f97316 !important;
+}
+.acr-refresh-btn:hover {
+  background: rgba(249, 115, 22, 0.1) !important;
+  color: #ea580c !important;
+}
 
 /* Select header with select-all checkbox */
 .acr-select-header {
