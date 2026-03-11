@@ -3,6 +3,19 @@
   "name": "AI Chat Reader",
   "version": "0.1.0",
   "description": "快速查看 AI 会话并跳转定位，支持导出对话为 Markdown",
+  "icons": {
+    "16": "assets/logo-128.png",
+    "48": "assets/logo-128.png",
+    "128": "assets/logo-128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "assets/logo-128.png",
+      "48": "assets/logo-128.png",
+      "128": "assets/logo-128.png"
+    },
+    "default_title": "AI Chat Reader"
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
