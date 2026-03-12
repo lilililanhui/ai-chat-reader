@@ -189,7 +189,7 @@ function getStyles(): string {
 /* Fab — transparent, draggable */
 .acr-fab {
   position: fixed; right: 60px; bottom: 120px;
-  width: 45px; height: 45px; border-radius: 0;
+  width: 40px; height: 40px; border-radius: 0;
   background: transparent; border: none;
   box-shadow: none;
   cursor: grab; padding: 0; overflow: visible;

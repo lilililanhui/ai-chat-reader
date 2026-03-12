@@ -114,7 +114,7 @@ export function openAbout(options: AboutOptions) {
   qrPopover.className = "acr-about-qr-popover";
 
   const qrImg = document.createElement("img");
-  qrImg.src = chrome.runtime.getURL("assets/qrcode.jpg");
+  qrImg.src = chrome.runtime.getURL("assets/wxqrcode.jpg");
   qrImg.alt = "微信公众号：ISTJ优化指南";
 
   const qrHint = document.createElement("div");
