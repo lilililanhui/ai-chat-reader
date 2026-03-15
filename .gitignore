@@ -6,3 +6,4 @@ dist
 specs/active/*
 !specs/active/.keep
 !specs/archive/
+release/
