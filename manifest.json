@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Chat Reader",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "快速查看 AI 会话并跳转定位，支持导出对话为 Markdown",
   "icons": {
     "16": "assets/logo-128.png",
