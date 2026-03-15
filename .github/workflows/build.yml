@@ -1,0 +1,47 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送 v 开头的 tag 时触发，如 v0.1.2
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build extension
+        run: npm run build
+      
+      - name: Create zip package
+        run: |
+          cd dist
+          zip -r ../ai-chat-reader-${{ github.ref_name }}.zip .
+      
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-chat-reader-extension
+          path: ai-chat-reader-*.zip
+      
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ai-chat-reader-*.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
