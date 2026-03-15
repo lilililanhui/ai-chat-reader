@@ -43,12 +43,12 @@ export function generateMarkdown(
 
   for (let i = 0; i < selectedTurns.length; i++) {
     const turn = selectedTurns[i];
-    const question = turn.user.content.replace(/\s+/g, " ").trim();
+    const question = cleanMarkdownContent(turn.user.content.replace(/\s+/g, " ").trim());
     lines.push(`## ${question || `对话 ${i + 1}`}`);
     lines.push("");
 
     if (turn.assistant) {
-      lines.push(turn.assistant.content);
+      lines.push(cleanMarkdownContent(turn.assistant.content));
       lines.push("");
     }
 
@@ -126,4 +126,12 @@ function formatDate(date: Date): string {
   const min = String(date.getMinutes()).padStart(2, "0");
   const s = String(date.getSeconds()).padStart(2, "0");
   return `${y}-${m}-${d} ${h}:${min}:${s}`;
+}
+
+/**
+ * 清理markdown内容中的无意义标记，如 [[source_group_web_12]] 等
+ */
+export function cleanMarkdownContent(content: string): string {
+  // 移除 [[...]] 格式的无意义引用标记
+  return content.replace(/\[\[[^\]]*\]\]/g, "").trim();
 }

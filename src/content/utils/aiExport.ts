@@ -1,6 +1,6 @@
 import type { ChatTurn, SessionInfo } from "../strategies/types.js";
 import type { AppConfig, ExportMetaConfig } from "./storage.js";
-import { generateMetaHeader } from "./exportMarkdown.js";
+import { generateMetaHeader, cleanMarkdownContent } from "./exportMarkdown.js";
 import { callLLM } from "./llmClient.js";
 
 type Section = {
@@ -119,7 +119,7 @@ async function generateFramework(
   signal: AbortSignal
 ): Promise<Section[]> {
   const questions = selectedTurns
-    .map((t, i) => `${i}. ${t.user.content.replace(/\s+/g, " ").trim()}`)
+    .map((t, i) => `${i}. ${cleanMarkdownContent(t.user.content.replace(/\s+/g, " ").trim())}`)
     .join("\n");
 
   const systemPrompt = `你是一位专业的技术文档整理助手。以下是一组用户与 AI 的对话中，用户提出的问题列表。
@@ -177,8 +177,8 @@ async function polishSection(
 ): Promise<string> {
   const conversations = turns
     .map((t) => {
-      const user = `用户：${t.user.content}`;
-      const ai = t.assistant ? `AI：${t.assistant.content}` : "";
+      const user = `用户：${cleanMarkdownContent(t.user.content)}`;
+      const ai = t.assistant ? `AI：${cleanMarkdownContent(t.assistant.content)}` : "";
       return [user, ai].filter(Boolean).join("\n");
     })
     .join("\n\n---\n\n");

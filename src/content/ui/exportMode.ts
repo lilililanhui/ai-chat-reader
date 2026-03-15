@@ -2,6 +2,7 @@ import type { ChatTurn, SessionInfo } from "../strategies/types.js";
 import { generateMarkdown, downloadMarkdown } from "../utils/exportMarkdown.js";
 import { generateAIDocument } from "../utils/aiExport.js";
 import { loadConfig, hasLLMConfigured } from "../utils/storage.js";
+import mermaid from "mermaid";
 
 type ExportModeOptions = {
   shadow: ShadowRoot;
@@ -397,10 +398,14 @@ export function enterExportMode(options: ExportModeOptions) {
     const contentArea = document.createElement("div");
     contentArea.className = "acr-preview-content rendered";
 
-    function renderContent() {
+    async function renderContent() {
       if (previewTab === "rendered") {
         contentArea.className = "acr-preview-content rendered";
         contentArea.innerHTML = markdownToHtml(currentMarkdown);
+        // Render mermaid diagrams after DOM update
+        await renderMermaidDiagrams(contentArea, shadow);
+        // Setup fullscreen buttons after mermaid is rendered
+        setupMermaidFullscreen(contentArea, shadow, panel);
       } else {
         contentArea.className = "acr-preview-content";
         contentArea.innerHTML = "";
@@ -409,7 +414,6 @@ export function enterExportMode(options: ExportModeOptions) {
         contentArea.appendChild(pre);
       }
     }
-    renderContent();
 
     renderedTab.addEventListener("click", () => {
       previewTab = "rendered";
@@ -449,6 +453,9 @@ export function enterExportMode(options: ExportModeOptions) {
 
     list.style.display = "none";
     panel.insertBefore(wrap, list);
+
+    // Initial render after DOM is ready
+    renderContent();
 
     // Back button in header
     injectBackBtn(() => {
@@ -519,13 +526,100 @@ function stripMarkdown(text: string): string {
     .trim();
 }
 
-function markdownToHtml(md: string): string {
-  let html = escapeHtml(md);
+// Store mermaid blocks to render after DOM insertion
+let mermaidBlocks: { id: string; code: string }[] = [];
+let mermaidIdCounter = 0;
 
-  // Code blocks
-  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_m, _lang, code) => {
-    return `<pre><code>${code.trim()}</code></pre>`;
+function markdownToHtml(md: string): string {
+  // Clean [[...]] reference markers first
+  let cleanMd = md.replace(/\[\[[^\]]*\]\]/g, "");
+  
+  // Reset mermaid blocks for this render
+  mermaidBlocks = [];
+  mermaidIdCounter = 0;
+
+  // Extract code blocks first to prevent them from being processed
+  const codeBlockPlaceholders: { placeholder: string; html: string }[] = [];
+  let codeBlockIndex = 0;
+
+  // Match code blocks with various formats:
+  // ```lang\ncontent``` or ```lang content``` (with optional space after lang)
+  cleanMd = cleanMd.replace(/```(\w*)[\s\n]([\s\S]*?)```/g, (_m, lang, code) => {
+    const placeholder = `__CODE_BLOCK_${codeBlockIndex++}__`;
+    const trimmedCode = code.trim();
+    
+    if (lang.toLowerCase() === "mermaid") {
+      // Handle mermaid diagrams
+      const mermaidId = `acr-mermaid-${mermaidIdCounter++}`;
+      mermaidBlocks.push({ id: mermaidId, code: trimmedCode });
+      codeBlockPlaceholders.push({
+        placeholder,
+        html: `<div class="acr-mermaid-container">
+          <div class="acr-mermaid-toolbar">
+            <span class="acr-mermaid-label">Mermaid 图表</span>
+            <button class="acr-mermaid-fullscreen-btn" data-mermaid-id="${mermaidId}" title="全屏">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+              </svg>
+            </button>
+          </div>
+          <div id="${mermaidId}" class="acr-mermaid"><div class="acr-mermaid-loading">正在加载图表...</div></div>
+        </div>`
+      });
+    } else {
+      codeBlockPlaceholders.push({
+        placeholder,
+        html: `<pre><code>${escapeHtml(trimmedCode)}</code></pre>`
+      });
+    }
+    return placeholder;
   });
+
+  // Extract tables before other processing
+  const tablePlaceholders: { placeholder: string; html: string }[] = [];
+  let tableIndex = 0;
+
+  // Match markdown tables
+  cleanMd = cleanMd.replace(/(\|[^\n]+\|\n)((?:\|[-:| ]+\|\n))(\|[^\n]+\|\n?)+/g, (match) => {
+    const placeholder = `__TABLE_${tableIndex++}__`;
+    const lines = match.trim().split("\n");
+    
+    if (lines.length < 2) {
+      return match;
+    }
+
+    // Parse header
+    const headerCells = parseTableRow(lines[0]);
+    
+    // Parse alignment from separator row
+    const alignments = parseTableAlignments(lines[1]);
+    
+    // Parse body rows
+    const bodyRows = lines.slice(2).map(line => parseTableRow(line));
+
+    // Build HTML table
+    let tableHtml = '<table class="acr-table"><thead><tr>';
+    headerCells.forEach((cell, i) => {
+      const align = alignments[i] || "left";
+      tableHtml += `<th style="text-align:${align}">${escapeHtml(cell.trim())}</th>`;
+    });
+    tableHtml += '</tr></thead><tbody>';
+    
+    bodyRows.forEach(row => {
+      tableHtml += '<tr>';
+      row.forEach((cell, i) => {
+        const align = alignments[i] || "left";
+        tableHtml += `<td style="text-align:${align}">${escapeHtml(cell.trim())}</td>`;
+      });
+      tableHtml += '</tr>';
+    });
+    tableHtml += '</tbody></table>';
+
+    tablePlaceholders.push({ placeholder, html: tableHtml });
+    return placeholder;
+  });
+
+  let html = escapeHtml(cleanMd);
 
   // Headings
   html = html.replace(/^######\s+(.+)$/gm, "<h6>$1</h6>");
@@ -568,9 +662,379 @@ function markdownToHtml(md: string): string {
   html = html.replace(/(<\/pre>)<\/p>/g, "$1");
   html = html.replace(/<p>\s*<\/p>/g, "");
 
+  // Restore code blocks
+  for (const { placeholder, html: blockHtml } of codeBlockPlaceholders) {
+    html = html.replace(placeholder, blockHtml);
+  }
+
+  // Restore tables
+  for (const { placeholder, html: tableHtml } of tablePlaceholders) {
+    html = html.replace(placeholder, tableHtml);
+  }
+
   return html;
+}
+
+function parseTableRow(line: string): string[] {
+  // Remove leading and trailing pipes, then split by pipe
+  const trimmed = line.trim().replace(/^\||\|$/g, "");
+  return trimmed.split("|");
+}
+
+function parseTableAlignments(separatorLine: string): string[] {
+  const cells = parseTableRow(separatorLine);
+  return cells.map(cell => {
+    const trimmed = cell.trim();
+    if (trimmed.startsWith(":") && trimmed.endsWith(":")) {
+      return "center";
+    } else if (trimmed.endsWith(":")) {
+      return "right";
+    }
+    return "left";
+  });
+}
+
+function getMermaidBlocks(): { id: string; code: string }[] {
+  return mermaidBlocks;
 }
 
 function escapeHtml(text: string): string {
   return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Mermaid library state
+let mermaidInitialized = false;
+
+function initMermaid(): void {
+  if (mermaidInitialized) return;
+  
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: "default",
+    securityLevel: "loose",
+  });
+  mermaidInitialized = true;
+}
+
+async function renderMermaidDiagrams(contentArea: HTMLElement, shadow: ShadowRoot): Promise<void> {
+  const blocks = getMermaidBlocks();
+  if (blocks.length === 0) return;
+
+  try {
+    initMermaid();
+
+    for (const block of blocks) {
+      const element = contentArea.querySelector(`#${block.id}`);
+      if (element) {
+        try {
+          // Generate unique ID for this render to avoid conflicts
+          const uniqueId = `mermaid-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+          
+          // Create a temporary container in the main document for rendering
+          const tempContainer = document.createElement("div");
+          tempContainer.style.position = "fixed";
+          tempContainer.style.left = "-10000px";
+          tempContainer.style.top = "0";
+          tempContainer.style.width = "1000px";
+          tempContainer.style.visibility = "hidden";
+          tempContainer.style.zIndex = "-1";
+          document.body.appendChild(tempContainer);
+
+          // Use mermaid.render with the temp container
+          const result = await mermaid.render(uniqueId, block.code, tempContainer);
+          const svgCode = result.svg;
+          
+          // Insert the SVG into our shadow DOM element
+          element.innerHTML = svgCode;
+          element.classList.add("acr-mermaid-rendered");
+          
+          // Clean up
+          tempContainer.remove();
+          
+          // Remove any SVG element that mermaid might have left in the document
+          const leftoverSvg = document.getElementById(uniqueId);
+          if (leftoverSvg) leftoverSvg.remove();
+          
+        } catch (err) {
+          console.error("Mermaid render error for block:", block.id, err);
+          element.innerHTML = `<div class="acr-mermaid-error">图表渲染失败: ${(err as Error).message || '未知错误'}</div>`;
+        }
+      }
+    }
+  } catch (err) {
+    console.error("Failed to initialize mermaid:", err);
+    // Show error on all mermaid blocks
+    for (const block of blocks) {
+      const element = contentArea.querySelector(`#${block.id}`);
+      if (element) {
+        element.innerHTML = `<div class="acr-mermaid-error">Mermaid 初始化失败</div>`;
+      }
+    }
+  }
+}
+
+function setupMermaidFullscreen(contentArea: HTMLElement, shadow: ShadowRoot, panel: HTMLDivElement): void {
+  const fullscreenBtns = contentArea.querySelectorAll(".acr-mermaid-fullscreen-btn");
+  
+  fullscreenBtns.forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const mermaidId = (btn as HTMLElement).getAttribute("data-mermaid-id");
+      if (!mermaidId) return;
+
+      const mermaidEl = contentArea.querySelector(`#${mermaidId}`);
+      if (!mermaidEl) return;
+
+      showMermaidFullscreen(mermaidEl.innerHTML, shadow, panel);
+    });
+  });
+}
+
+function showMermaidFullscreen(svgContent: string, shadow: ShadowRoot, panel: HTMLDivElement): void {
+  // Create fullscreen view within the panel
+  const fullscreenWrap = document.createElement("div");
+  fullscreenWrap.className = "acr-mermaid-fullscreen-wrap";
+  
+  // Toolbar
+  const toolbar = document.createElement("div");
+  toolbar.className = "acr-mermaid-fullscreen-toolbar";
+  
+  const title = document.createElement("span");
+  title.textContent = "Mermaid 图表";
+  title.className = "acr-mermaid-fullscreen-title";
+  
+  const toolbarActions = document.createElement("div");
+  toolbarActions.className = "acr-mermaid-fullscreen-actions";
+  
+  // Zoom controls
+  const zoomOutBtn = document.createElement("button");
+  zoomOutBtn.className = "acr-mermaid-zoom-btn";
+  zoomOutBtn.type = "button";
+  zoomOutBtn.title = "缩小";
+  zoomOutBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M8 11h6"/>
+  </svg>`;
+  
+  const zoomLevel = document.createElement("span");
+  zoomLevel.className = "acr-mermaid-zoom-level";
+  zoomLevel.textContent = "100%";
+  
+  const zoomInBtn = document.createElement("button");
+  zoomInBtn.className = "acr-mermaid-zoom-btn";
+  zoomInBtn.type = "button";
+  zoomInBtn.title = "放大";
+  zoomInBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M11 8v6"/><path d="M8 11h6"/>
+  </svg>`;
+  
+  const resetBtn = document.createElement("button");
+  resetBtn.className = "acr-mermaid-zoom-btn";
+  resetBtn.type = "button";
+  resetBtn.title = "重置视图";
+  resetBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+    <path d="M3 3v5h5"/>
+  </svg>`;
+  
+  const closeBtn = document.createElement("button");
+  closeBtn.className = "acr-mermaid-fullscreen-close";
+  closeBtn.type = "button";
+  closeBtn.title = "退出全屏";
+  closeBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+  </svg>`;
+  
+  toolbarActions.appendChild(zoomOutBtn);
+  toolbarActions.appendChild(zoomLevel);
+  toolbarActions.appendChild(zoomInBtn);
+  toolbarActions.appendChild(resetBtn);
+  toolbarActions.appendChild(closeBtn);
+  
+  toolbar.appendChild(title);
+  toolbar.appendChild(toolbarActions);
+  
+  // Canvas area with pan/zoom support
+  const canvasArea = document.createElement("div");
+  canvasArea.className = "acr-mermaid-canvas-area";
+  
+  const canvasContent = document.createElement("div");
+  canvasContent.className = "acr-mermaid-canvas-content";
+  canvasContent.innerHTML = svgContent;
+  
+  canvasArea.appendChild(canvasContent);
+  
+  fullscreenWrap.appendChild(toolbar);
+  fullscreenWrap.appendChild(canvasArea);
+  
+  // Hide other content and show fullscreen
+  const previewWrap = panel.querySelector(".acr-preview-wrap") as HTMLElement;
+  const footer = shadow.querySelector(".acr-footer") as HTMLElement;
+  
+  if (previewWrap) previewWrap.style.display = "none";
+  if (footer) footer.style.display = "none";
+  
+  panel.appendChild(fullscreenWrap);
+  
+  // Animation
+  requestAnimationFrame(() => {
+    fullscreenWrap.classList.add("visible");
+  });
+  
+  // Zoom and pan state
+  let scale = 1;
+  let translateX = 0;
+  let translateY = 0;
+  let isPanning = false;
+  let startX = 0;
+  let startY = 0;
+  
+  const minScale = 0.25;
+  const maxScale = 4;
+  const scaleStep = 0.25;
+  
+  function updateTransform() {
+    canvasContent.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scale})`;
+    zoomLevel.textContent = `${Math.round(scale * 100)}%`;
+  }
+  
+  function zoomIn() {
+    scale = Math.min(maxScale, scale + scaleStep);
+    updateTransform();
+  }
+  
+  function zoomOut() {
+    scale = Math.max(minScale, scale - scaleStep);
+    updateTransform();
+  }
+  
+  function resetView() {
+    scale = 1;
+    translateX = 0;
+    translateY = 0;
+    updateTransform();
+  }
+  
+  // Zoom button handlers
+  zoomInBtn.addEventListener("click", zoomIn);
+  zoomOutBtn.addEventListener("click", zoomOut);
+  resetBtn.addEventListener("click", resetView);
+  
+  // Mouse wheel zoom
+  canvasArea.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const delta = e.deltaY > 0 ? -scaleStep : scaleStep;
+    const newScale = Math.max(minScale, Math.min(maxScale, scale + delta));
+    
+    // Zoom towards mouse position
+    const rect = canvasArea.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    const centerX = rect.width / 2;
+    const centerY = rect.height / 2;
+    
+    const pointX = (mouseX - centerX - translateX) / scale;
+    const pointY = (mouseY - centerY - translateY) / scale;
+    
+    scale = newScale;
+    
+    translateX = mouseX - centerX - pointX * scale;
+    translateY = mouseY - centerY - pointY * scale;
+    
+    updateTransform();
+  }, { passive: false });
+  
+  // Pan handlers
+  canvasArea.addEventListener("mousedown", (e) => {
+    if (e.button !== 0) return; // Only left mouse button
+    isPanning = true;
+    startX = e.clientX - translateX;
+    startY = e.clientY - translateY;
+    canvasArea.style.cursor = "grabbing";
+    e.preventDefault();
+  });
+  
+  canvasArea.addEventListener("mousemove", (e) => {
+    if (!isPanning) return;
+    translateX = e.clientX - startX;
+    translateY = e.clientY - startY;
+    updateTransform();
+  });
+  
+  const stopPanning = () => {
+    isPanning = false;
+    canvasArea.style.cursor = "grab";
+  };
+  
+  canvasArea.addEventListener("mouseup", stopPanning);
+  canvasArea.addEventListener("mouseleave", stopPanning);
+  
+  // Touch support for mobile
+  let lastTouchDistance = 0;
+  let lastTouchCenter = { x: 0, y: 0 };
+  
+  canvasArea.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 1) {
+      isPanning = true;
+      startX = e.touches[0].clientX - translateX;
+      startY = e.touches[0].clientY - translateY;
+    } else if (e.touches.length === 2) {
+      // Pinch zoom
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      lastTouchDistance = Math.sqrt(dx * dx + dy * dy);
+      lastTouchCenter = {
+        x: (e.touches[0].clientX + e.touches[1].clientX) / 2,
+        y: (e.touches[0].clientY + e.touches[1].clientY) / 2
+      };
+    }
+    e.preventDefault();
+  }, { passive: false });
+  
+  canvasArea.addEventListener("touchmove", (e) => {
+    if (e.touches.length === 1 && isPanning) {
+      translateX = e.touches[0].clientX - startX;
+      translateY = e.touches[0].clientY - startY;
+      updateTransform();
+    } else if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (lastTouchDistance > 0) {
+        const scaleChange = distance / lastTouchDistance;
+        scale = Math.max(minScale, Math.min(maxScale, scale * scaleChange));
+        updateTransform();
+      }
+      
+      lastTouchDistance = distance;
+    }
+    e.preventDefault();
+  }, { passive: false });
+  
+  canvasArea.addEventListener("touchend", () => {
+    isPanning = false;
+    lastTouchDistance = 0;
+  });
+  
+  // Close handler
+  const close = () => {
+    fullscreenWrap.classList.remove("visible");
+    setTimeout(() => {
+      fullscreenWrap.remove();
+      if (previewWrap) previewWrap.style.display = "";
+      if (footer) footer.style.display = "";
+    }, 200);
+  };
+  
+  closeBtn.addEventListener("click", close);
+  
+  // ESC key to close
+  const keyHandler = (e: KeyboardEvent) => {
+    if (e.key === "Escape") {
+      close();
+      document.removeEventListener("keydown", keyHandler);
+    }
+  };
+  document.addEventListener("keydown", keyHandler);
 }
