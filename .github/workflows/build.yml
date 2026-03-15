@@ -26,10 +26,32 @@ jobs:
       - name: Build extension
         run: npm run build
       
+      - name: Debug - List dist contents
+        run: |
+          echo "=== dist folder contents ==="
+          ls -la dist/
+          echo "=== dist/assets contents ==="
+          ls -la dist/assets/ || echo "No assets folder"
+          echo "=== dist/manifest.json ==="
+          cat dist/manifest.json || echo "No manifest.json"
+      
       - name: Create zip package
         run: |
+          # 确保在项目根目录
+          pwd
+          # 验证 dist 存在且不为空
+          if [ ! -d "dist" ] || [ -z "$(ls -A dist)" ]; then
+            echo "Error: dist folder is empty or does not exist!"
+            exit 1
+          fi
+          # 打包 dist 文件夹内容
           cd dist
-          zip -r ../ai-chat-reader-${{ github.ref_name }}.zip .
+          pwd
+          zip -r ../ai-chat-reader-${{ github.ref_name }}.zip ./*
+          cd ..
+          # 验证 zip 内容
+          echo "=== ZIP contents ==="
+          unzip -l ai-chat-reader-${{ github.ref_name }}.zip
       
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
